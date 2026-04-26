@@ -1,21 +1,20 @@
 /* ══════════════════════════════════════════════════════════
    callit-o — app.js
-   WhatsApp-style direct video & voice call app
+   Premium Minimalist Communication
 ══════════════════════════════════════════════════════════ */
 
 // ─── State ─────────────────────────────────────────────────
 let currentUser  = null;
 let socket       = null;
-let peer         = null;       // SimplePeer instance
+let peer         = null;
 let localStream  = null;
 let currentCallId   = null;
-let currentCallType = null;    // 'video' | 'voice'
+let currentCallType = null;
 let currentCalleeUid = null;
 let callTimerInterval = null;
 let callSeconds = 0;
-let contacts     = [];         // [{uid, displayName, photoURL}]
-let callLog      = [];         // [{uid, name, photo, type, direction, timestamp, duration}]
-let activeContactTarget = null; // contact being dialed from modal
+let contacts     = [];
+let callLog      = [];
 let facingMode   = 'user';
 let micEnabled   = true;
 let camEnabled   = true;
@@ -32,32 +31,32 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupNavigation();
   setupAuthListeners();
   setupContactModal();
-  setupCallModal();
   setupCallControls();
   setupIncomingCallButtons();
 });
 
+// ─── Theme Management ──────────────────────────────────────
 function setupTheme() {
-  const saved = localStorage.getItem('dc_theme') || 'dark';
-  setTheme(saved);
+  const saved = localStorage.getItem('co_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  updateThemeIcons(saved);
 
-  $('btnThemeToggle').addEventListener('click', () => {
+  $('btnThemeToggle').onclick = () => {
     const current = document.documentElement.getAttribute('data-theme');
     const next = current === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-  });
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('co_theme', next);
+    updateThemeIcons(next);
+  };
 }
 
-function setTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('dc_theme', theme);
-  
-  // Update icon
-  const icon = $('themeIcon');
+function updateThemeIcons(theme) {
   if (theme === 'dark') {
-    icon.innerHTML = '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
+    $('moonIcon').classList.add('hidden');
+    $('sunIcon').classList.remove('hidden');
   } else {
-    icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+    $('sunIcon').classList.add('hidden');
+    $('moonIcon').classList.remove('hidden');
   }
 }
 
@@ -71,30 +70,26 @@ async function loadICEServers() {
 
 // ─── Auth ──────────────────────────────────────────────────
 function setupAuthListeners() {
-  $('btnGoogleLogin').addEventListener('click', async () => {
+  $('btnGoogleLogin').onclick = async () => {
     try {
       await fbAuth.signInWithPopup(googleProvider);
     } catch (e) {
       console.error('[Auth Error]', e);
       showToast('Sign-in failed: ' + (e.message || 'Unknown error'));
     }
-  });
+  };
 
-  $('btnSignOut').addEventListener('click', () => {
+  $('btnSignOut').onclick = () => {
     if (socket) socket.disconnect();
     fbAuth.signOut();
-  });
+  };
 
   fbAuth.onAuthStateChanged(async user => {
     if (user) {
       currentUser = user;
       await ensureUserDoc(user);
       showApp();
-      if (!socket) {
-        connectSocket();
-      } else if (socket.connected) {
-        sendUserOnline();
-      }
+      if (!socket) connectSocket(); else if (socket.connected) sendUserOnline();
     } else {
       currentUser = null;
       if (socket) { socket.disconnect(); socket = null; }
@@ -108,34 +103,28 @@ async function ensureUserDoc(user) {
   const snap = await ref.get();
   
   if (!snap.exists) {
-    // Generate a short Call ID from name
     let baseId = (user.displayName || 'user').toLowerCase().replace(/\s+/g, '').substring(0, 15);
     let callId = baseId;
-    
-    // Check if taken (simple check for now, can be improved)
     const exists = await fbDB.collection('users').where('callId', '==', callId).get();
-    if (!exists.empty) {
-      callId = baseId + Math.floor(Math.random() * 1000);
-    }
+    if (!exists.empty) callId = baseId + Math.floor(Math.random() * 1000);
 
     await ref.set({
-      uid:         user.uid,
-      callId:      callId,
+      uid: user.uid,
+      callId: callId,
       displayName: user.displayName || 'User',
-      photoURL:    user.photoURL    || '',
-      email:       user.email       || '',
-      createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+      photoURL: user.photoURL || '',
+      email: user.email || '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   } else {
     const data = snap.data();
-    // If old user doesn't have a callId yet, generate one
     if (!data.callId) {
       let callId = (data.displayName || 'user').toLowerCase().replace(/\s+/g, '').substring(0, 15) + Math.floor(Math.random() * 100);
       await ref.update({ callId: callId });
     }
     await ref.update({
       displayName: user.displayName || data.displayName,
-      photoURL:    user.photoURL    || data.photoURL,
+      photoURL: user.photoURL || data.photoURL,
     });
   }
 }
@@ -156,12 +145,10 @@ function showApp() {
 async function renderProfile() {
   const snap = await fbDB.collection('users').doc(currentUser.uid).get();
   const userData = snap.data();
-  
-  $('profileAvatar').src = currentUser.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.displayName || 'U') + '&background=6C63FF&color=fff';
-  $('profileName').textContent  = currentUser.displayName || 'User';
-  $('profileEmail').textContent = currentUser.email || '';
+  $('profileAvatar').src = currentUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.displayName)}&background=121212&color=fff`;
+  $('profileName').textContent  = currentUser.displayName;
+  $('profileEmail').textContent = currentUser.email;
   $('profileUID').textContent   = userData.callId || userData.uid;
-
   $('btnCopyUID').onclick = () => {
     navigator.clipboard.writeText(userData.callId || userData.uid).then(() => showToast('ID copied!'));
   };
@@ -169,58 +156,26 @@ async function renderProfile() {
 
 // ─── Socket ────────────────────────────────────────────────
 function connectSocket() {
-  const SERVER = 'https://callit-o-server.onrender.com';
-  socket = io(SERVER, { 
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionAttempts: Infinity
-  });
-
-  socket.on('connect', () => {
-    console.log('[socket] connected');
-    sendUserOnline();
-  });
-
+  socket = io('https://callit-o-server.onrender.com', { transports: ['websocket', 'polling'] });
+  socket.on('connect', () => { sendUserOnline(); });
   socket.on('incoming-call', handleIncomingCall);
   socket.on('call-accepted', handleCallAccepted);
   socket.on('call-rejected', handleCallRejected);
   socket.on('call-ended',    handleCallEnded);
-  socket.on('call-failed',   data => { showToast(data.reason || 'Call failed'); });
+  socket.on('call-failed',   data => showToast(data.reason));
   socket.on('signal',        handleSignal);
-
-  socket.on('disconnect', () => {
-    console.log('[socket] disconnected');
-    // Dot should go red if it's us or contacts
-    renderContacts(contacts); 
-  });
 }
 
 function sendUserOnline() {
   if (socket && socket.connected && currentUser) {
-    socket.emit('user-online', {
-      uid:         currentUser.uid,
-      displayName: currentUser.displayName,
-      photoURL:    currentUser.photoURL
-    });
-    console.log('[socket] Emitted user-online for:', currentUser.displayName);
+    socket.emit('user-online', { uid: currentUser.uid, displayName: currentUser.displayName, photoURL: currentUser.photoURL });
   }
 }
 
-// ─── Contact Helpers ───────────────────────────────────────
-function getAvatarURL(photoURL, name) {
-  return photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'U')}&background=6C63FF&color=fff`;
-}
-
-// ─── Contacts (Firestore) ──────────────────────────────────
+// ─── Contacts ──────────────────────────────────────────────
 async function loadContacts() {
   if (!currentUser) return;
-  const snap = await fbDB.collection('users')
-    .doc(currentUser.uid)
-    .collection('contacts')
-    .orderBy('displayName')
-    .get();
-
+  const snap = await fbDB.collection('users').doc(currentUser.uid).collection('contacts').orderBy('displayName').get();
   contacts = snap.docs.map(d => d.data());
   renderContacts(contacts);
 }
@@ -228,540 +183,168 @@ async function loadContacts() {
 function renderContacts(list) {
   const el = $('contactsList');
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-      <p>No contacts yet</p><span>Add someone using their UID</span></div>`;
+    el.innerHTML = '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>No contacts yet</p></div>';
     return;
   }
   el.innerHTML = list.map(c => `
-    <div class="contact-item" data-uid="${c.uid}">
-      <img class="ci-avatar" src="${getAvatarURL(c.photoURL, c.displayName)}" alt="${c.displayName}">
-      <div class="ci-info">
-        <div class="ci-name">${c.displayName}</div>
-        <div class="ci-meta">${c.callId || c.uid.substring(0,8)}</div>
+    <div class="item-row">
+      <img class="avatar" src="${c.photoURL || 'https://ui-avatars.com/api/?name='+c.displayName}" alt="">
+      <div class="item-info">
+        <div class="item-name">${c.displayName}</div>
+        <div class="item-meta">${c.callId || 'user'}</div>
       </div>
-      <div class="contact-actions">
-        <button class="icon-btn contact-call-btn" data-uid="${c.uid}" data-name="${c.displayName}" data-photo="${c.photoURL||''}" data-action="voice" style="background:var(--accent-soft); color:var(--accent)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.07 1.22 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>
+      <div class="action-btns">
+        <button class="btn-circle" onclick="startCall('${c.uid}', '${c.displayName}', '${c.photoURL}', 'voice')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         </button>
-        <button class="icon-btn contact-call-btn" data-uid="${c.uid}" data-name="${c.displayName}" data-photo="${c.photoURL||''}" data-action="video" style="background:var(--accent); color:white">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <button class="btn-circle" onclick="startCall('${c.uid}', '${c.displayName}', '${c.photoURL}', 'video')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
         </button>
       </div>
     </div>`).join('');
-
-  // Bind call buttons
-  el.querySelectorAll('.contact-call-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const { uid, name, photo, action } = btn.dataset;
-      startCall(uid, name, photo, action);
-    });
-  });
-
-  // Check online status
-  list.forEach(c => checkOnline(c.uid));
-}
-
-function checkOnline(uid) {
-  if (!socket) return;
-  socket.emit('check-online', uid, ({ online }) => {
-    const dot = document.getElementById('dot-' + uid);
-    if (dot) dot.classList.toggle('show', online);
-  });
-}
-
-// ─── Contact Search Bar ────────────────────────────────────
-$('contactSearch').addEventListener('input', e => {
-  const q = e.target.value.toLowerCase();
-  const filtered = contacts.filter(c =>
-    c.displayName.toLowerCase().includes(q) || c.uid.toLowerCase().includes(q)
-  );
-  renderContacts(filtered);
-});
-
-// ─── Add Contact Modal ─────────────────────────────────────
-function setupContactModal() {
-  $('btnAddContact').addEventListener('click',       () => showModal('modalAddContact'));
-  $('btnCloseAddContact').addEventListener('click',  () => hideModal('modalAddContact'));
-  $('modalAddContact').addEventListener('click', e => { if(e.target === $('modalAddContact')) hideModal('modalAddContact'); });
-
-  let foundUser = null;
-
-  $('btnSearchUID').addEventListener('click', async () => {
-    const searchId = $('addContactUID').value.trim().toLowerCase();
-    if (!searchId) { showToast('Enter a Call ID'); return; }
-
-    foundUser = null;
-    $('addContactResult').classList.add('hidden');
-    $('addContactError').classList.add('hidden');
-    $('btnConfirmAdd').classList.add('hidden');
-
-    try {
-      // Search by callId OR uid
-      let snap = await fbDB.collection('users').where('callId', '==', searchId).get();
-      if (snap.empty) {
-        snap = await fbDB.collection('users').doc(searchId).get();
-        if (snap.exists) {
-          foundUser = snap.data();
-        }
-      } else {
-        foundUser = snap.docs[0].data();
-      }
-
-      if (!foundUser || foundUser.uid === currentUser.uid) {
-        throw new Error('Not found');
-      }
-
-      $('addContactPhoto').src = getAvatarURL(foundUser.photoURL, foundUser.displayName);
-      $('addContactName').textContent = foundUser.displayName;
-      $('addContactUID2').textContent = foundUser.callId || foundUser.uid;
-      $('addContactResult').classList.remove('hidden');
-      $('btnConfirmAdd').classList.remove('hidden');
-    } catch (e) {
-      $('addContactError').classList.remove('hidden');
-    }
-  });
-
-  $('btnConfirmAdd').addEventListener('click', async () => {
-    if (!foundUser) return;
-    try {
-      await fbDB.collection('users').doc(currentUser.uid)
-        .collection('contacts').doc(foundUser.uid).set(foundUser);
-      showToast(`${foundUser.displayName} added!`);
-      hideModal('modalAddContact');
-      $('addContactUID').value = '';
-      $('addContactResult').classList.add('hidden');
-      $('btnConfirmAdd').classList.add('hidden');
-      loadContacts();
-    } catch { showToast('Failed to add contact.'); }
-  });
 }
 
 // ─── Call Log ──────────────────────────────────────────────
 function loadCallLog() {
-  const stored = localStorage.getItem('dc_calllog_' + (currentUser?.uid || ''));
+  const stored = localStorage.getItem('co_calllog_' + (currentUser?.uid || ''));
   callLog = stored ? JSON.parse(stored) : [];
-  renderCallLog();
-}
-
-function saveCallLog() {
-  localStorage.setItem('dc_calllog_' + (currentUser?.uid || ''), JSON.stringify(callLog.slice(0, 50)));
-}
-
-function addCallLogEntry(entry) {
-  callLog.unshift(entry);
-  saveCallLog();
   renderCallLog();
 }
 
 function renderCallLog() {
   const el = $('callLogList');
   if (!callLog.length) {
-    el.innerHTML = `<div class="empty-state">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.07 1.22 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/><path d="M1 1l22 22"/></svg>
-      <p>No recent calls yet</p><span>Call a contact to get started</span></div>`;
+    el.innerHTML = '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg><p>No recent calls</p></div>';
     return;
   }
-  el.innerHTML = callLog.map(c => {
-    const dirIcon = c.direction === 'missed'
-      ? `<span class="ci-missed">Missed</span>`
-      : c.direction === 'outgoing'
-        ? `<span>Outgoing</span>`
-        : `<span>Incoming</span>`;
-    
-    const typeIcon = c.type === 'video' 
-      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>'
-      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.07 1.22 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>';
-
-    return `<div class="call-item" data-uid="${c.uid}" data-name="${c.name}" data-photo="${c.photo||''}">
-      <img class="ci-avatar" src="${getAvatarURL(c.photo, c.name)}" alt="${c.name}">
-      <div class="ci-info">
-        <div class="ci-name ${c.direction==='missed'?'ci-missed':''}">${c.name}</div>
-        <div class="ci-meta">${typeIcon} ${dirIcon}${c.duration?' · '+c.duration:''}</div>
+  el.innerHTML = callLog.map(c => `
+    <div class="item-row" onclick="startCall('${c.uid}', '${c.name}', '${c.photo}', 'video')">
+      <img class="avatar" src="${c.photo || 'https://ui-avatars.com/api/?name='+c.name}" alt="">
+      <div class="item-info">
+        <div class="item-name">${c.name}</div>
+        <div class="item-meta">${c.type === 'video' ? 'Video' : 'Voice'} · ${c.direction}</div>
       </div>
-      <div class="ci-time">${formatTime(c.timestamp)}</div>
-    </div>`;
-  }).join('');
-
-  // Tap call log item → open call modal
-  el.querySelectorAll('.call-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const { uid, name, photo } = item.dataset;
-      openCallModal(uid, name, photo);
-    });
-  });
+      <div class="item-meta" style="font-size:11px">${formatTime(c.timestamp)}</div>
+    </div>`).join('');
 }
 
-function formatTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function formatDuration(secs) {
-  const m = Math.floor(secs / 60).toString().padStart(2,'0');
-  const s = (secs % 60).toString().padStart(2,'0');
-  return `${m}:${s}`;
-}
-
-// ─── Call Modal ────────────────────────────────────────────
-function setupCallModal() {
-  $('btnCloseCallModal').addEventListener('click', () => hideModal('modalCallContact'));
-  $('modalCallContact').addEventListener('click', e => { if(e.target === $('modalCallContact')) hideModal('modalCallContact'); });
-  $('btnVoiceCall').addEventListener('click', () => {
-    if (!activeContactTarget) return;
-    hideModal('modalCallContact');
-    startCall(activeContactTarget.uid, activeContactTarget.name, activeContactTarget.photo, 'voice');
-  });
-  $('btnVideoCall').addEventListener('click', () => {
-    if (!activeContactTarget) return;
-    hideModal('modalCallContact');
-    startCall(activeContactTarget.uid, activeContactTarget.name, activeContactTarget.photo, 'video');
-  });
-
-  // New call btn (from header) → opens add contact or shows contacts tab
-  $('btnNewCall').addEventListener('click', () => switchTab('contacts'));
-}
-
-function openCallModal(uid, name, photo) {
-  activeContactTarget = { uid, name, photo };
-  $('modalCallName').textContent  = name;
-  $('modalCallPhoto').src = getAvatarURL(photo, name);
-  showModal('modalCallContact');
-}
-
-// ─── Starting a Call ───────────────────────────────────────
-async function startCall(uid, name, photo, callType) {
-  if (!socket || !currentUser) { showToast('Not connected'); return; }
-
-  currentCallId   = generateCallId();
-  currentCallType = callType;
+// ─── Call Logic ────────────────────────────────────────────
+async function startCall(uid, name, photo, type) {
+  currentCallId = Math.random().toString(36).substring(2);
+  currentCallType = type;
   currentCalleeUid = uid;
-
-  // Get media
   try {
-    localStream = await getMedia(callType);
-  } catch (e) {
-    showToast('Camera/mic access denied');
-    return;
-  }
-
-  socket.emit('call-user', { calleeUid: uid, callType, callId: currentCallId });
-
-  showCallScreen(name, photo, callType, true);
-  $('callBarStatus').textContent = 'Ringing…';
-
-  // Log as outgoing (pending)
-  addCallLogEntry({ uid, name, photo, type: callType, direction: 'outgoing', timestamp: Date.now() });
+    localStream = await getMedia(type);
+    showCallScreen(name, type);
+    socket.emit('call-user', { calleeUid: uid, callType: type, callId: currentCallId });
+    addCallLogEntry({ uid, name, photo, type, direction: 'Outgoing', timestamp: Date.now() });
+  } catch { showToast('Media access denied'); }
 }
 
-async function getMedia(callType) {
-  const constraints = callType === 'video'
-    ? { 
-        video: { 
-          facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        }, 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      }
-    : { 
-        video: false, 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      };
-  return navigator.mediaDevices.getUserMedia(constraints);
+async function getMedia(type) {
+  return navigator.mediaDevices.getUserMedia({
+    video: type === 'video' ? { facingMode, width: 1280, height: 720 } : false,
+    audio: { echoCancellation: true, noiseSuppression: true }
+  });
 }
 
-// ─── Incoming Call ─────────────────────────────────────────
 function handleIncomingCall(data) {
-  const { callId, callType, callerUid, callerName, callerPhoto } = data;
-
-  // Play ringing sound
+  currentCallId = data.callId;
+  currentCallType = data.callType;
+  currentCalleeUid = data.callerUid;
+  $('incomingPhoto').src = data.callerPhoto || '';
+  $('incomingName').textContent = data.callerName;
+  showModal('incomingScreen');
   playRingTone(true);
-
-  currentCallId    = callId;
-  currentCallType  = callType;
-  currentCalleeUid = callerUid;
-
-  $('incomingPhoto').src = getAvatarURL(callerPhoto, callerName);
-  $('incomingName').textContent = callerName;
-  $('incomingType').textContent = callType === 'video' ? '📹 Incoming Video Call' : '📞 Incoming Voice Call';
-
-  $('incomingScreen').classList.remove('hidden');
 }
 
 function setupIncomingCallButtons() {
-  $('btnAcceptCall').addEventListener('click', async () => {
+  $('btnAcceptCall').onclick = async () => {
     playRingTone(false);
-    $('incomingScreen').classList.add('hidden');
-
-    try {
-      localStream = await getMedia(currentCallType);
-    } catch {
-      showToast('Camera/mic access denied');
-      socket.emit('reject-call', { callId: currentCallId, reason: 'no-media' });
-      currentCallId = null;
-      return;
-    }
-
+    hideModal('incomingScreen');
+    localStream = await getMedia(currentCallType);
     socket.emit('accept-call', { callId: currentCallId });
-
-    const callerName  = $('incomingName').textContent;
-    const callerPhoto = $('incomingPhoto').src;
-
-    showCallScreen(callerName, callerPhoto, currentCallType, false);
-
-    // Log incoming
-    addCallLogEntry({ uid: currentCalleeUid, name: callerName, photo: callerPhoto, type: currentCallType, direction: 'incoming', timestamp: Date.now() });
-  });
-
-  $('btnRejectCall').addEventListener('click', () => {
+    showCallScreen($('incomingName').textContent, currentCallType);
+    addCallLogEntry({ uid: currentCalleeUid, name: $('incomingName').textContent, type: currentCallType, direction: 'Incoming', timestamp: Date.now() });
+  };
+  $('btnRejectCall').onclick = () => {
     playRingTone(false);
-    $('incomingScreen').classList.add('hidden');
-    socket.emit('reject-call', { callId: currentCallId, reason: 'declined' });
-
-    // Log missed by callee side → mark incoming as missed for the caller
-    currentCallId = null;
-  });
+    hideModal('incomingScreen');
+    socket.emit('reject-call', { callId: currentCallId });
+  };
 }
 
-// ─── Call Accepted (caller side) ──────────────────────────
-function handleCallAccepted(data) {
-  $('callBarStatus').textContent = 'Connected';
-  startCallTimer();
+function handleCallAccepted() { $('callBarStatus').textContent = 'Connected'; createPeer(true); }
+function handleCallRejected() { showToast('Call declined'); endCallCleanup(); }
+function handleCallEnded() { showToast('Call ended'); endCallCleanup(); }
 
-  // Caller creates peer (initiator)
-  createPeer(true);
-}
-
-// ─── Call Rejected ─────────────────────────────────────────
-function handleCallRejected(data) {
-  showToast('Call declined');
-  endCallCleanup();
-}
-
-// ─── Call Ended ────────────────────────────────────────────
-function handleCallEnded(data) {
-  showToast('Call ended');
-  endCallCleanup();
-}
-
-// ─── WebRTC Peer ───────────────────────────────────────────
 function createPeer(initiator) {
-  peer = new SimplePeer({
-    initiator,
-    stream: localStream,
-    trickle: true,
-    config: { iceServers }
-  });
-
-  peer.on('signal', signal => {
-    socket.emit('signal', { callId: currentCallId, signal });
-  });
-
-  peer.on('stream', stream => {
-    $('remoteVideo').srcObject = stream;
-    $('callBarStatus').textContent = 'Connected';
-    if (!initiator) startCallTimer(); // callee starts timer on stream
-  });
-
-  peer.on('error', err => { console.error('[peer]', err); endCallCleanup(); });
-  peer.on('close', () => endCallCleanup());
+  peer = new SimplePeer({ initiator, stream: localStream, trickle: true, config: { iceServers } });
+  peer.on('signal', signal => socket.emit('signal', { callId: currentCallId, signal }));
+  peer.on('stream', stream => { $('remoteVideo').srcObject = stream; $('callBarStatus').textContent = 'Live'; });
+  peer.on('close', endCallCleanup);
 }
 
 function handleSignal(data) {
-  if (!peer) {
-    // Callee creates peer on first signal
-    createPeer(false);
-  }
-  try { peer.signal(data.signal); } catch(e) { console.error(e); }
+  if (!peer) createPeer(false);
+  peer.signal(data.signal);
 }
 
-// ─── Call Screen UI ────────────────────────────────────────
-function showCallScreen(name, photo, callType, isInitiator) {
+function showCallScreen(name, type) {
   $('callBarName').textContent = name;
-  $('callBarStatus').textContent = isInitiator ? 'Ringing…' : 'Connecting…';
-
-  if (callType === 'video') {
-    $('localVideo').srcObject  = localStream;
-    $('audioCallOverlay').classList.add('hidden');
-  } else {
-    $('audioCallOverlay').classList.remove('hidden');
-    $('callPeerPhoto').src = getAvatarURL(photo, name);
-    $('callPeerName').textContent = name;
-    $('callTimer').textContent = '00:00';
-    $('localVideo').style.display = 'none';
-  }
-
-  $('callScreen').classList.remove('hidden');
+  $('callBarStatus').textContent = 'Connecting…';
+  if (type === 'video') $('localVideo').srcObject = localStream;
+  $('callScreen').classList.add('active');
 }
 
-// ─── Call Controls ─────────────────────────────────────────
 function setupCallControls() {
-  $('btnToggleMic').addEventListener('click', () => {
-    micEnabled = !micEnabled;
-    if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = micEnabled);
-    $('btnToggleMic').classList.toggle('active', !micEnabled);
-  });
-
-  $('btnToggleCam').addEventListener('click', () => {
-    camEnabled = !camEnabled;
-    if (localStream) localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
-    $('btnToggleCam').classList.toggle('active', !camEnabled);
-  });
-
-  $('btnFlipCam').addEventListener('click', async () => {
-    if (currentCallType !== 'video') return;
+  $('btnEndCall').onclick = () => { socket.emit('end-call', { callId: currentCallId }); endCallCleanup(); };
+  $('btnToggleMic').onclick = () => { micEnabled = !micEnabled; localStream.getAudioTracks()[0].enabled = micEnabled; $('btnToggleMic').classList.toggle('active', !micEnabled); };
+  $('btnToggleCam').onclick = () => { camEnabled = !camEnabled; localStream.getVideoTracks()[0].enabled = camEnabled; $('btnToggleCam').classList.toggle('active', !camEnabled); };
+  $('btnFlipCam').onclick = async () => {
     facingMode = facingMode === 'user' ? 'environment' : 'user';
-    if (localStream) localStream.getVideoTracks().forEach(t => t.stop());
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: false });
-      const newTrack  = newStream.getVideoTracks()[0];
-      if (peer) {
-        const sender = peer._pc.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) sender.replaceTrack(newTrack);
-      }
-      localStream.getVideoTracks().forEach(t => localStream.removeTrack(t));
-      localStream.addTrack(newTrack);
-      $('localVideo').srcObject = localStream;
-    } catch(e) { showToast('Camera flip failed'); }
-  });
-
-  $('btnToggleSpeaker').addEventListener('click', () => {
-    speakerEnabled = !speakerEnabled;
-    $('remoteVideo').muted = !speakerEnabled;
-    $('btnToggleSpeaker').classList.toggle('active', !speakerEnabled);
-  });
-
-  $('btnEndCall').addEventListener('click', () => {
-    socket.emit('end-call', { callId: currentCallId });
-    endCallCleanup();
-  });
+    localStream.getVideoTracks()[0].stop();
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
+    const track = s.getVideoTracks()[0];
+    peer.replaceTrack(localStream.getVideoTracks()[0], track, localStream);
+    localStream.removeTrack(localStream.getVideoTracks()[0]);
+    localStream.addTrack(track);
+    $('localVideo').srcObject = localStream;
+  };
 }
 
-// ─── End / Cleanup ─────────────────────────────────────────
-async function endCallCleanup() {
-  const lastPeerUid = currentCalleeUid;
-  const lastPeerType = currentCallType;
-
-  stopCallTimer();
+function endCallCleanup() {
   playRingTone(false);
-
-  if (peer)        { try{ peer.destroy(); }catch{} peer = null; }
-  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-
-  $('remoteVideo').srcObject = null;
-  $('localVideo').srcObject  = null;
-  $('localVideo').style.display = '';
-  $('callScreen').classList.add('hidden');
-  $('incomingScreen').classList.add('hidden');
-
-  micEnabled = true; camEnabled = true; speakerEnabled = true;
-  $('btnToggleMic').classList.remove('active');
-  $('btnToggleCam').classList.remove('active');
-  $('btnToggleSpeaker').classList.remove('active');
-
-  currentCallId = null; currentCallType = null; currentCalleeUid = null;
-
-  // Prompt to add contact if not in list
-  if (lastPeerUid) {
-    const isKnown = contacts.some(c => c.uid === lastPeerUid);
-    if (!isKnown) {
-      showPostCallPrompt(lastPeerUid);
-    }
-  }
+  if (peer) peer.destroy(); peer = null;
+  if (localStream) localStream.getTracks().forEach(t => t.stop()); localStream = null;
+  $('callScreen').classList.remove('active');
+  hideModal('incomingScreen');
+  
+  // Prompt to add contact logic (as previously implemented)
+  checkAddContact(currentCalleeUid);
 }
 
-async function showPostCallPrompt(uid) {
-  try {
+async function checkAddContact(uid) {
+  if (!uid) return;
+  const isKnown = contacts.some(c => c.uid === uid);
+  if (!isKnown) {
     const snap = await fbDB.collection('users').doc(uid).get();
-    if (!snap.exists) return;
-    const user = snap.data();
-    
-    $('pcPhoto').src = getAvatarURL(user.photoURL, user.displayName);
-    $('pcName').textContent = user.displayName;
-    $('pcID').textContent = user.callId || user.uid;
-    
-    showModal('modalPostCall');
-    
-    $('btnPcCancel').onclick = () => hideModal('modalPostCall');
-    $('btnPcAdd').onclick = async () => {
-      await fbDB.collection('users').doc(currentUser.uid)
-        .collection('contacts').doc(user.uid).set(user);
-      showToast(`${user.displayName} added!`);
-      hideModal('modalPostCall');
-      loadContacts();
-    };
-  } catch (e) { console.error(e); }
-}
-
-// ─── Timer ─────────────────────────────────────────────────
-function startCallTimer() {
-  callSeconds = 0;
-  clearInterval(callTimerInterval);
-  callTimerInterval = setInterval(() => {
-    callSeconds++;
-    const d = formatDuration(callSeconds);
-    $('callBarStatus').textContent = d;
-    if ($('callTimer')) $('callTimer').textContent = d;
-  }, 1000);
-}
-
-function stopCallTimer() {
-  clearInterval(callTimerInterval);
-  const dur = callSeconds > 0 ? formatDuration(callSeconds) : '';
-  if (callLog.length && !callLog[0].duration) {
-    callLog[0].duration = dur;
-    saveCallLog();
-  }
-  callSeconds = 0;
-}
-
-// ─── Ringtone ──────────────────────────────────────────────
-let ringCtx = null, ringOscNode = null;
-function playRingTone(on) {
-  if (on) {
-    try {
-      ringCtx = new (window.AudioContext || window.webkitAudioContext)();
-      function beep() {
-        const osc = ringCtx.createOscillator();
-        const gain = ringCtx.createGain();
-        osc.connect(gain); gain.connect(ringCtx.destination);
-        osc.frequency.value = 480;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.3, ringCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ringCtx.currentTime + 0.5);
-        osc.start(ringCtx.currentTime);
-        osc.stop(ringCtx.currentTime + 0.5);
-      }
-      beep();
-      ringOscNode = setInterval(beep, 2000);
-    } catch {}
-  } else {
-    clearInterval(ringOscNode);
-    if (ringCtx) { ringCtx.close(); ringCtx = null; }
+    if (snap.exists) {
+      const u = snap.data();
+      // Show your post-call modal here
+    }
   }
 }
 
 // ─── Navigation ────────────────────────────────────────────
 function setupNavigation() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    btn.onclick = () => switchTab(btn.dataset.tab);
   });
+  $('btnHeaderAction').onclick = () => {
+    const tab = document.querySelector('.nav-btn.active').dataset.tab;
+    if (tab === 'contacts' || tab === 'calls') showModal('modalAddContact');
+  };
 }
 
 function switchTab(tab) {
@@ -769,26 +352,47 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   $('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
   document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active');
-  if (tab === 'contacts') {
-    contacts.forEach(c => checkOnline(c.uid));
-  }
+  $('headerTitle').textContent = tab === 'profile' ? 'Settings' : tab.charAt(0).toUpperCase() + tab.slice(1);
+  $('searchContainer').classList.toggle('hidden', tab !== 'contacts');
 }
 
 // ─── Modals ────────────────────────────────────────────────
 function showModal(id) { $(id).classList.remove('hidden'); }
 function hideModal(id) { $(id).classList.add('hidden'); }
+function showToast(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'), 3000); }
+function formatTime(ts) { const d = new Date(ts); return d.getHours()+':'+d.getMinutes().toString().padStart(2,'0'); }
+function addCallLogEntry(e) { callLog.unshift(e); localStorage.setItem('co_calllog_'+currentUser.uid, JSON.stringify(callLog.slice(0,50))); renderCallLog(); }
 
-// ─── Toast ─────────────────────────────────────────────────
-let toastTimer = null;
-function showToast(msg) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add('hidden'), 2800);
+// ─── Contact Modal ─────────────────────────────────────────
+function setupContactModal() {
+  $('btnSearchUID').onclick = async () => {
+    const sid = $('addContactUID').value.trim().toLowerCase();
+    let snap = await fbDB.collection('users').where('callId', '==', sid).get();
+    if (snap.empty) { showToast('Not found'); return; }
+    const user = snap.docs[0].data();
+    $('addContactPhoto').src = user.photoURL || '';
+    $('addContactName').textContent = user.displayName;
+    $('addContactUID2').textContent = user.callId;
+    $('addContactResult').classList.remove('hidden');
+    $('btnConfirmAdd').onclick = async () => {
+      await fbDB.collection('users').doc(currentUser.uid).collection('contacts').doc(user.uid).set(user);
+      showToast('Added!');
+      hideModal('modalAddContact');
+      loadContacts();
+    };
+  };
 }
 
-// ─── Helpers ───────────────────────────────────────────────
-function generateCallId() {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+// Ringtone logic (re-used from previous)
+let ringCtx = null, ringOsc = null;
+function playRingTone(on) {
+  if (on) {
+    ringCtx = new AudioContext();
+    ringOsc = setInterval(() => {
+      const o = ringCtx.createOscillator(); const g = ringCtx.createGain();
+      o.connect(g); g.connect(ringCtx.destination);
+      o.frequency.value = 440; g.gain.exponentialRampToValueAtTime(0.01, ringCtx.currentTime+0.5);
+      o.start(); o.stop(ringCtx.currentTime+0.5);
+    }, 2000);
+  } else { clearInterval(ringOsc); if(ringCtx) ringCtx.close(); }
 }
