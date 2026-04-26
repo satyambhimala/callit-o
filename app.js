@@ -26,6 +26,7 @@ let iceServers   = [
   { urls: 'stun:stun1.l.google.com:19302' }
 ];
 let pendingSignals = [];
+let mediaPromise   = null;
 
 // ─── DOM ───────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -370,10 +371,20 @@ async function startCall(uid, name, photo, type) {
 }
 
 async function getMedia(type) {
-  return navigator.mediaDevices.getUserMedia({
+  if (mediaPromise) return mediaPromise;
+  
+  mediaPromise = navigator.mediaDevices.getUserMedia({
     video: type === 'video' ? { facingMode, width: 1280, height: 720 } : false,
     audio: { echoCancellation: true, noiseSuppression: true }
   });
+  
+  try {
+    const stream = await mediaPromise;
+    return stream;
+  } catch (e) {
+    mediaPromise = null;
+    throw e;
+  }
 }
 
 function handleIncomingCall(data) {
@@ -387,11 +398,14 @@ function handleIncomingCall(data) {
   showModal('incomingScreen');
   playRingTone(true);
   
-  // PRE-WARM MEDIA: Start getting stream as soon as call appears for instant response
+  // PRE-WARM MEDIA: Start getting stream as soon as call appears
   getMedia(data.callType).then(stream => {
     localStream = stream;
     console.log('[Media] Pre-warmed local stream');
-  }).catch(e => console.error('[Media] Pre-warm failed', e));
+  }).catch(e => {
+    console.error('[Media] Pre-warm failed', e);
+    mediaPromise = null;
+  });
 }
 
 function setupIncomingCallButtons() {
@@ -399,16 +413,25 @@ function setupIncomingCallButtons() {
     $('btnAcceptCall').onclick = async () => {
       playRingTone(false);
       hideModal('incomingScreen');
-      if (!localStream) localStream = await getMedia(currentCallType);
+      
+      if (!localStream) {
+        try {
+          localStream = await getMedia(currentCallType);
+        } catch(e) {
+          showToast('Camera/Mic permission denied');
+          return;
+        }
+      }
+      
       socket.emit('accept-call', { callId: currentCallId });
       showCallScreen($('incomingName').textContent, currentCallType);
       
       // Create peer immediately on acceptance to be ready for signals
-      if (!peer) createPeer(false);
+      createPeer(false);
       
       // Process any signals that arrived while we were accepting
       if (pendingSignals.length > 0) {
-        console.log('[Signal] Processing pending signals:', pendingSignals.length);
+        console.log('[Signal] Callee processing pending signals:', pendingSignals.length);
         pendingSignals.forEach(sig => peer.signal(sig));
         pendingSignals = [];
       }
@@ -423,7 +446,17 @@ function setupIncomingCallButtons() {
   }
 }
 
-function handleCallAccepted() { $('callBarStatus').textContent = 'Connected'; createPeer(true); }
+function handleCallAccepted() { 
+  $('callBarStatus').textContent = 'Connected'; 
+  if (!peer) createPeer(true); 
+  
+  // Caller must also process signals that arrived before the peer was ready
+  if (pendingSignals.length > 0) {
+    console.log('[Signal] Caller processing pending signals:', pendingSignals.length);
+    pendingSignals.forEach(sig => peer.signal(sig));
+    pendingSignals = [];
+  }
+}
 function handleCallRejected() { showToast('Call declined'); endCallCleanup(); }
 function handleCallEnded() { showToast('Call ended'); endCallCleanup(); }
 
@@ -652,6 +685,7 @@ function endCallCleanup() {
   if (peer) { try { peer.destroy(); } catch(e) {} }
   peer = null;
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  mediaPromise = null;
   pendingSignals = [];
   
   FaceDetection.stop();
@@ -853,18 +887,37 @@ function startLiveCaptions() {
 
 // In createPeer, update stream target for stranger
 function createPeer(initiator, isStranger = false) {
-  peer = new SimplePeer({ initiator, stream: localStream, trickle: true, config: { iceServers } });
-  peer.on('signal', signal => socket.emit('signal', { callId: currentCallId, signal }));
+  if (peer) { try { peer.destroy(); } catch(e) {} }
+  
+  console.log(`[Peer] Creating peer (initiator: ${initiator})`);
+  peer = new SimplePeer({ 
+    initiator, 
+    stream: localStream, 
+    trickle: true, 
+    config: { iceServers } 
+  });
+
+  peer.on('signal', signal => {
+    console.log('[Peer] Signal generated');
+    socket.emit('signal', { callId: currentCallId, signal });
+  });
+
+  peer.on('connect', () => {
+    console.log('[Peer] P2P Connected!');
+    $('callBarStatus').textContent = 'Live';
+  });
+
   peer.on('stream', stream => { 
+    console.log('[Peer] Received remote stream');
     if (isStranger || isStrangerCall) {
-      $('strangerRemoteVideo').srcObject = stream;
+      if ($('strangerRemoteVideo')) $('strangerRemoteVideo').srcObject = stream;
       
       const prefs = JSON.parse(localStorage.getItem('mf_prefs') || '{}');
-      if (prefs.anon) $('strangerRemoteVideo').style.filter = 'blur(15px)';
-      else $('strangerRemoteVideo').style.filter = 'none';
+      if (prefs.anon && $('strangerRemoteVideo')) $('strangerRemoteVideo').style.filter = 'blur(15px)';
+      else if ($('strangerRemoteVideo')) $('strangerRemoteVideo').style.filter = 'none';
 
     } else {
-      $('remoteVideo').srcObject = stream; 
+      if ($('remoteVideo')) $('remoteVideo').srcObject = stream; 
       $('callBarStatus').textContent = 'Live'; 
     }
     callStartTime = Date.now();
