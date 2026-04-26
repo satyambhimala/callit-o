@@ -29,8 +29,8 @@ const io = new Server(server, {
 });
 
 // ─── ICE / TURN credentials ────────────────────────────────
-const CF_APP_ID     = process.env.CF_APP_ID     || '';
-const CF_APP_SECRET = process.env.CF_APP_SECRET || '';
+const CF_APP_ID     = process.env.CF_APP_ID     || 'ee0c7d26aa57c3663b2792fe48a6727f';
+const CF_APP_SECRET = process.env.CF_APP_SECRET || '59e91bf38806e2ab7056072738d0656b937fb015e5e5b37cb745367e45e69988';
 
 const STUN_ONLY = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -43,7 +43,7 @@ app.get("/ice", async (req, res) => {
   if (!CF_APP_ID || !CF_APP_SECRET) return res.json(STUN_ONLY);
   try {
     const r = await fetch(
-      `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_APP_ID}/credentials/generate`,
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_APP_ID}/credentials/generate-ice-servers`,
       {
         method: "POST",
         headers: {
@@ -218,4 +218,4 @@ io.on("connection", (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`DirectCall server on port ${PORT}`));
+server.listen(PORT, () => console.log(`callit-o server on port ${PORT}`));

@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════
-   DirectCall — app.js
+   callit-o — app.js
    WhatsApp-style direct video & voice call app
 ══════════════════════════════════════════════════════════ */
 
