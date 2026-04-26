@@ -27,6 +27,7 @@ const $ = id => document.getElementById(id);
 
 // ─── Init ──────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
+  setupTheme();
   await loadICEServers();
   setupNavigation();
   setupAuthListeners();
@@ -35,6 +36,30 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupCallControls();
   setupIncomingCallButtons();
 });
+
+function setupTheme() {
+  const saved = localStorage.getItem('dc_theme') || 'dark';
+  setTheme(saved);
+
+  $('btnThemeToggle').addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+  });
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('dc_theme', theme);
+  
+  // Update icon
+  const icon = $('themeIcon');
+  if (theme === 'dark') {
+    icon.innerHTML = '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
+  } else {
+    icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+  }
+}
 
 // ─── ICE Servers ───────────────────────────────────────────
 async function loadICEServers() {
@@ -210,20 +235,17 @@ function renderContacts(list) {
   }
   el.innerHTML = list.map(c => `
     <div class="contact-item" data-uid="${c.uid}">
-      <div class="avatar-wrap">
-        <img class="ci-avatar" src="${getAvatarURL(c.photoURL, c.displayName)}" alt="${c.displayName}">
-        <div class="online-dot" id="dot-${c.uid}"></div>
-      </div>
+      <img class="ci-avatar" src="${getAvatarURL(c.photoURL, c.displayName)}" alt="${c.displayName}">
       <div class="ci-info">
         <div class="ci-name">${c.displayName}</div>
-        <div class="ci-meta" style="color:var(--tx3);font-size:11px;margin-top:2px">${c.uid.substring(0,12)}…</div>
+        <div class="ci-meta">${c.callId || c.uid.substring(0,8)}</div>
       </div>
       <div class="contact-actions">
-        <button class="contact-call-btn voice" data-uid="${c.uid}" data-name="${c.displayName}" data-photo="${c.photoURL||''}" data-action="voice" title="Voice Call">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.07 1.22 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>
+        <button class="icon-btn contact-call-btn" data-uid="${c.uid}" data-name="${c.displayName}" data-photo="${c.photoURL||''}" data-action="voice" style="background:var(--accent-soft); color:var(--accent)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.07 1.22 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>
         </button>
-        <button class="contact-call-btn video" data-uid="${c.uid}" data-name="${c.displayName}" data-photo="${c.photoURL||''}" data-action="video" title="Video Call">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <button class="icon-btn contact-call-btn" data-uid="${c.uid}" data-name="${c.displayName}" data-photo="${c.photoURL||''}" data-action="video" style="background:var(--accent); color:white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px; height:20px"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
         </button>
       </div>
     </div>`).join('');
@@ -343,11 +365,15 @@ function renderCallLog() {
   }
   el.innerHTML = callLog.map(c => {
     const dirIcon = c.direction === 'missed'
-      ? `<span class="ci-missed">↙ Missed</span>`
+      ? `<span class="ci-missed">Missed</span>`
       : c.direction === 'outgoing'
-        ? `<span>↗ Outgoing</span>`
-        : `<span>↙ Incoming</span>`;
-    const typeIcon = c.type === 'video' ? '📹' : '📞';
+        ? `<span>Outgoing</span>`
+        : `<span>Incoming</span>`;
+    
+    const typeIcon = c.type === 'video' 
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.07 1.22 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>';
+
     return `<div class="call-item" data-uid="${c.uid}" data-name="${c.name}" data-photo="${c.photo||''}">
       <img class="ci-avatar" src="${getAvatarURL(c.photo, c.name)}" alt="${c.name}">
       <div class="ci-info">
@@ -436,8 +462,27 @@ async function startCall(uid, name, photo, callType) {
 
 async function getMedia(callType) {
   const constraints = callType === 'video'
-    ? { video: { facingMode }, audio: true }
-    : { video: false, audio: true };
+    ? { 
+        video: { 
+          facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 }
+        }, 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      }
+    : { 
+        video: false, 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      };
   return navigator.mediaDevices.getUserMedia(constraints);
 }
 
@@ -609,7 +654,10 @@ function setupCallControls() {
 }
 
 // ─── End / Cleanup ─────────────────────────────────────────
-function endCallCleanup() {
+async function endCallCleanup() {
+  const lastPeerUid = currentCalleeUid;
+  const lastPeerType = currentCallType;
+
   stopCallTimer();
   playRingTone(false);
 
@@ -628,6 +676,37 @@ function endCallCleanup() {
   $('btnToggleSpeaker').classList.remove('active');
 
   currentCallId = null; currentCallType = null; currentCalleeUid = null;
+
+  // Prompt to add contact if not in list
+  if (lastPeerUid) {
+    const isKnown = contacts.some(c => c.uid === lastPeerUid);
+    if (!isKnown) {
+      showPostCallPrompt(lastPeerUid);
+    }
+  }
+}
+
+async function showPostCallPrompt(uid) {
+  try {
+    const snap = await fbDB.collection('users').doc(uid).get();
+    if (!snap.exists) return;
+    const user = snap.data();
+    
+    $('pcPhoto').src = getAvatarURL(user.photoURL, user.displayName);
+    $('pcName').textContent = user.displayName;
+    $('pcID').textContent = user.callId || user.uid;
+    
+    showModal('modalPostCall');
+    
+    $('btnPcCancel').onclick = () => hideModal('modalPostCall');
+    $('btnPcAdd').onclick = async () => {
+      await fbDB.collection('users').doc(currentUser.uid)
+        .collection('contacts').doc(user.uid).set(user);
+      showToast(`${user.displayName} added!`);
+      hideModal('modalPostCall');
+      loadContacts();
+    };
+  } catch (e) { console.error(e); }
 }
 
 // ─── Timer ─────────────────────────────────────────────────
