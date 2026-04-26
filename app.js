@@ -39,7 +39,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 // ─── ICE Servers ───────────────────────────────────────────
 async function loadICEServers() {
   try {
-    const r = await fetch('/ice');
+    const r = await fetch('https://callit-o-server.onrender.com/ice');
     iceServers = await r.json();
   } catch { iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]; }
 }
@@ -50,7 +50,8 @@ function setupAuthListeners() {
     try {
       await fbAuth.signInWithPopup(googleProvider);
     } catch (e) {
-      showToast('Sign-in failed. Please try again.');
+      console.error('[Auth Error]', e);
+      showToast('Sign-in failed: ' + (e.message || 'Unknown error'));
     }
   });
 
@@ -119,7 +120,7 @@ function renderProfile() {
 
 // ─── Socket ────────────────────────────────────────────────
 function connectSocket() {
-  const SERVER = window.location.origin;
+  const SERVER = 'https://callit-o-server.onrender.com';
   socket = io(SERVER, { transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
