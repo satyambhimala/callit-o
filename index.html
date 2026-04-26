@@ -14,7 +14,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Ubuntu:wght@400;500;700&family=Jost:wght@700;800&display=swap" rel="stylesheet">
 
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -94,55 +94,59 @@
         <div id="contactsList"></div>
       </div>
 
-      <div id="tabStrangers" class="tab-pane" style="height: 100%; position: relative;">
-        <div id="strangerView" style="position: absolute; top:0; left:0; right:0; bottom:0; display:flex; flex-direction:column; background:#000; color:#fff; overflow:hidden;">
-          <div id="swipeContainer" style="flex:1; position:relative; overflow:hidden; touch-action:none;">
-             <video id="strangerRemoteVideo" style="width:100%; height:100%; object-fit:cover;" autoplay playsinline></video>
-             <video id="strangerLocalVideo" style="position:absolute; top:20px; left:20px; width:100px; height:140px; border-radius:12px; border:2px solid rgba(255,255,255,0.2); object-fit:cover; z-index:10; background:#000;" autoplay playsinline muted></video>
+      <div id="tabStrangers" class="tab-pane">
+        <div class="mf-system-wrap">
+          <div id="swipeContainer" class="mf-swipe-area">
+             <video id="strangerRemoteVideo" class="mf-remote-video" autoplay playsinline></video>
+             <video id="strangerLocalVideo" class="mf-local-video" autoplay playsinline muted></video>
              
              <!-- AI Icebreaker -->
-             <div id="icebreakerOverlay" class="hidden" style="position:absolute; top:40px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.6); padding:12px 24px; border-radius:100px; backdrop-filter:blur(10px); font-size:14px; text-align:center; width:max-content; max-width:90%; z-index:10; pointer-events:none;">
+             <div id="icebreakerOverlay" class="hidden mf-overlay-badge mf-icebreaker">
                ✨ <span id="icebreakerText">What's your favorite movie?</span>
              </div>
 
              <!-- Live Captions -->
-             <div id="liveCaptions" style="position:absolute; bottom:140px; left:20px; right:20px; text-align:center; text-shadow: 0 2px 4px rgba(0,0,0,1); font-size:20px; font-weight:700; color:#fff; min-height:30px; pointer-events:none;"></div>
+             <div id="liveCaptions" class="mf-captions"></div>
 
-             <div id="swipeInstruction" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(0,0,0,0.7); z-index:20;">
-                <h3 style="margin-bottom:12px; font-size:32px; font-weight:800; background:linear-gradient(90deg, #6C63FF, #2ED573); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">MeetlyFUN</h3>
-                <p style="margin-bottom:32px; color:rgba(255,255,255,0.7);">Match randomly by interests & languages</p>
-                <button id="btnStrangerPrefsOpen" class="btn-primary" style="background:rgba(255,255,255,0.2); backdrop-filter:blur(10px); margin-bottom:16px;">Set Match DNA</button>
-                <button id="btnStartStrangerMatch" class="btn-primary" style="background:var(--success); color:#fff; font-size:18px; padding:16px;">Start Swiping</button>
+             <div id="swipeInstruction" class="mf-instruction">
+                <div class="mf-logo-big">
+                  <span class="mf-logo-m">Meetly</span><span class="mf-logo-f">FUN</span>
+                </div>
+                <p>Premium Random Video Discovery</p>
+                <div class="mf-instruction-actions">
+                  <button id="btnStrangerPrefsOpen" class="btn-secondary">DNA Match Settings</button>
+                  <button id="btnStartStrangerMatch" class="btn-primary mf-start-btn">Start Swiping</button>
+                </div>
              </div>
           </div>
 
-          <div id="strangerControls" class="hidden" style="position:absolute; bottom:20px; left:20px; right:20px; display:flex; justify-content:space-between; align-items:flex-end; pointer-events:none; z-index:10;">
-            <div style="display:flex; flex-direction:column; gap:8px;">
-               <h3 id="strangerName" style="margin:0; text-shadow:0 1px 4px rgba(0,0,0,0.8);">Searching...</h3>
-               <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                 <span id="strangerLangBadge" style="background:var(--accent); color:var(--bg); font-size:10px; padding:4px 8px; border-radius:100px; font-weight:700; pointer-events:auto;">EN / ES</span>
-                 <span id="strangerRepBadge" style="background:var(--success); color:#fff; font-size:10px; padding:4px 8px; border-radius:100px; font-weight:700; pointer-events:auto;">4.9 ★</span>
+          <div id="strangerControls" class="hidden mf-controls">
+            <div class="mf-peer-meta">
+               <h3 id="strangerName">Searching...</h3>
+               <div class="mf-badges">
+                 <span id="strangerLangBadge" class="mf-badge">EN / ES</span>
+                 <span id="strangerRepBadge" class="mf-badge success">4.9 ★</span>
                </div>
             </div>
-            <div style="display:flex; flex-direction:column; gap:16px; pointer-events:auto;">
-               <button class="btn-circle" id="btnStrangerReport" style="background:rgba(255, 59, 48, 0.2); color:#FF3B30; border:1px solid rgba(255, 59, 48, 0.4);" title="Report User">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:20px;height:20px"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+            <div class="mf-action-stack">
+               <button class="btn-circle mf-danger" id="btnStrangerReport" title="Report User">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
                </button>
-               <button class="btn-circle" id="btnStrangerFilters" style="background:var(--surface); color:var(--tx); border:1px solid var(--border);" title="Camera Filters">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:20px;height:20px"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+               <button class="btn-circle mf-glass" id="btnStrangerFilters" title="Camera Filters">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
                </button>
-               <button class="btn-circle" id="btnStrangerNext" style="background:var(--success); color:#fff; width:64px; height:64px; border:none; box-shadow: 0 4px 15px rgba(46, 213, 115, 0.4);">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="width:28px;height:28px;"><polyline points="9 18 15 12 9 6"/></svg>
+               <button class="btn-circle mf-next" id="btnStrangerNext">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg>
                </button>
             </div>
           </div>
 
           <!-- AI Safety Overlay -->
-          <div id="aiSafetyBadge" class="hidden" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.6); padding:8px 12px; border-radius:100px; backdrop-filter:blur(10px); color:#2ED573; font-size:11px; font-weight:700; display:flex; align-items:center; gap:6px; z-index:15;">
-            <div style="width:6px; height:6px; background:#2ED573; border-radius:50%; animation: pulse 1.5s infinite;"></div>
+          <div id="aiSafetyBadge" class="hidden mf-overlay-badge mf-safety">
+            <div class="pulse-dot"></div>
             AI SAFETY ACTIVE
           </div>
-       </div>
+        </div>
 
        <!-- Filter Picker -->
        <div id="filterPicker" class="hidden" style="position:absolute; inset:0; background:var(--bg); z-index:35; padding:24px; overflow-y:auto;">
@@ -227,7 +231,7 @@
       </button>
       <button class="nav-btn" data-tab="strangers">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20z"/><path d="M2 12h20"/></svg>
-        <span>Explore</span>
+        <span>MeetlyFUN</span>
       </button>
       <button class="nav-btn" data-tab="profile">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
