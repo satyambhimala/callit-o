@@ -386,8 +386,35 @@ function setupCallControls() {
     };
   }
 
-  $('btnToggleMic').onclick = () => { micEnabled = !micEnabled; localStream.getAudioTracks()[0].enabled = micEnabled; $('btnToggleMic').classList.toggle('active', !micEnabled); };
-  $('btnToggleCam').onclick = () => { 
+  $('btnToggleMic').onclick = () => { 
+    if (localStream.getAudioTracks().length > 0) {
+      micEnabled = !micEnabled; 
+      localStream.getAudioTracks()[0].enabled = micEnabled; 
+      $('btnToggleMic').classList.toggle('active', !micEnabled); 
+    }
+  };
+  
+  $('btnToggleCam').onclick = async () => { 
+    // Upgrade voice call to video call dynamically
+    if (localStream.getVideoTracks().length === 0) {
+      try {
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode, width: 1280, height: 720 } });
+        const newVideoTrack = tempStream.getVideoTracks()[0];
+        localStream.addTrack(newVideoTrack);
+        if (peer && !peer.destroyed) {
+          peer.addTrack(newVideoTrack, localStream);
+        }
+        $('localVideo').srcObject = localStream;
+        camEnabled = true;
+        $('btnToggleCam').classList.remove('active');
+        $('localVideo').style.opacity = '1';
+        $('localAvatarBox').classList.add('hidden');
+      } catch (e) {
+        showToast('Camera access denied');
+      }
+      return;
+    }
+
     camEnabled = !camEnabled; 
     localStream.getVideoTracks()[0].enabled = camEnabled; 
     $('btnToggleCam').classList.toggle('active', !camEnabled); 
@@ -395,7 +422,9 @@ function setupCallControls() {
     $('localAvatarImg').src = currentUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.displayName)}`;
     $('localAvatarBox').classList.toggle('hidden', camEnabled);
   };
+
   $('btnFlipCam').onclick = async () => {
+    if (localStream.getVideoTracks().length === 0) return;
     facingMode = facingMode === 'user' ? 'environment' : 'user';
     localStream.getVideoTracks()[0].stop();
     const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
@@ -410,6 +439,10 @@ function setupCallControls() {
 
   let screenStream = null;
   $('btnScreenShare').onclick = async () => {
+    if (localStream.getVideoTracks().length === 0) {
+      showToast('Turn camera on first to share screen');
+      return;
+    }
     if (!screenStream) {
       try {
         screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
