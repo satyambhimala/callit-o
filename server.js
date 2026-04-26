@@ -72,6 +72,10 @@ const socketToUid = new Map();
 // callId → { callerUid, calleeUid, socketCaller, socketCallee, type }
 const activeCalls = new Map();
 
+// ─── MeetlyFUN State ───────────────────────────────────────
+// Match queue: array of { uid, socketId, prefs }
+let mfQueue = [];
+
 // ─── Helpers ───────────────────────────────────────────────
 function getSocketForUid(uid) {
   const sid = onlineUsers.get(uid);
@@ -182,6 +186,66 @@ io.on("connection", (socket) => {
     console.log(`[end] callId ${callId}`);
   });
 
+  // ─── MeetlyFUN Matching ───────────────────────────────────
+  socket.on("meetlyfun-match", (data) => {
+    const { uid, prefs } = data;
+    if (!uid) return;
+
+    // Remove user from queue if already there
+    mfQueue = mfQueue.filter(q => q.uid !== uid);
+
+    // Find a partner (basic random for now, can be improved with interest matching)
+    if (mfQueue.length > 0) {
+      const partner = mfQueue.shift();
+      const partnerSocket = io.sockets.sockets.get(partner.socketId);
+
+      if (partnerSocket) {
+        const callId = `mf_${Math.random().toString(36).substring(2)}`;
+        
+        activeCalls.set(callId, {
+          callerUid: partner.uid,
+          calleeUid: uid,
+          callerSocket: partner.socketId,
+          calleeSocket: socket.id,
+          type: 'video',
+          state: 'connected'
+        });
+
+        partnerSocket.emit('meetlyfun-matched', {
+          callId,
+          partnerUid: uid,
+          initiator: true
+        });
+
+        socket.emit('meetlyfun-matched', {
+          callId,
+          partnerUid: partner.uid,
+          initiator: false
+        });
+
+        console.log(`[match] ${uid} matched with ${partner.uid}`);
+      } else {
+        // Partner disconnected while in queue
+        mfQueue.push({ uid, socketId: socket.id, prefs });
+        socket.emit('meetlyfun-status', { message: 'Searching for matches...' });
+      }
+    } else {
+      mfQueue.push({ uid, socketId: socket.id, prefs });
+      socket.emit('meetlyfun-status', { message: 'Searching for matches...' });
+    }
+  });
+
+  socket.on("report-user", (data) => {
+    const { targetUid } = data;
+    if (!targetUid) return;
+
+    const targetSocket = getSocketForUid(targetUid);
+    if (targetSocket) {
+      targetSocket.emit('user-reported', { by: socket.displayName || 'Anonymous' });
+    }
+    console.log(`[report] ${socket.uid} reported ${targetUid}`);
+  });
+
   // ─── WebRTC Signaling ─────────────────────────────────────
   socket.on("signal", (data) => {
     const { callId, signal } = data;
@@ -200,6 +264,7 @@ io.on("connection", (socket) => {
     const uid = socketToUid.get(socket.id);
     if (uid && onlineUsers.get(uid) === socket.id) {
       onlineUsers.delete(uid);
+      mfQueue = mfQueue.filter(q => q.uid !== uid);
     }
     socketToUid.delete(socket.id);
 

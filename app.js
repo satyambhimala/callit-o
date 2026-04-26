@@ -37,7 +37,32 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupIncomingCallButtons();
   setupMeetlyFun();
   checkRoomLink();
+  initSafetySystems();
 });
+
+// ─── Safety Systems ────────────────────────────────────────
+async function initSafetySystems() {
+  const banStatus = BanSystem.checkBan();
+  if (banStatus.banned) {
+    alert(banStatus.message);
+    fbAuth.signOut();
+    return;
+  }
+  
+  // Init Face Detection & NSFW Detection
+  FaceDetection.on('status', data => console.log('[FaceAI]', data.message));
+  NSFWDetection.on('status', data => console.log('[NSFWAI]', data.message));
+  
+  NSFWDetection.on('violation', data => {
+    console.warn('[Safety] NSFW Violation detected!', data.category);
+    showToast('⚠️ Safety warning: Community guidelines must be followed.');
+    const result = BanSystem.recordViolation('NSFW content detected');
+    if (result.action === 'perm' || result.action.startsWith('temp')) {
+      alert(result.message);
+      location.reload();
+    }
+  });
+}
 
 // ─── Theme Management ──────────────────────────────────────
 function setupTheme() {
@@ -183,6 +208,15 @@ function connectSocket() {
   socket.on('call-ended',    handleCallEnded);
   socket.on('call-failed',   data => showToast(data.reason));
   socket.on('signal',        handleSignal);
+  socket.on('user-reported', data => {
+    const result = BanSystem.recordReport(data.by);
+    if (result) {
+      alert(result.message);
+      location.reload();
+    } else {
+      showToast('⚠️ You have been reported for community guideline violations.');
+    }
+  });
 }
 
 function sendUserOnline() {
@@ -354,8 +388,6 @@ function setupIncomingCallButtons() {
 function handleCallAccepted() { $('callBarStatus').textContent = 'Connected'; createPeer(true); }
 function handleCallRejected() { showToast('Call declined'); endCallCleanup(); }
 function handleCallEnded() { showToast('Call ended'); endCallCleanup(); }
-
-
 
 function handleSignal(data) {
   if (!peer) createPeer(false);
@@ -553,6 +585,11 @@ function endCallCleanup() {
   }
   if (peer) peer.destroy(); peer = null;
   if (localStream) localStream.getTracks().forEach(t => t.stop()); localStream = null;
+  
+  FaceDetection.stop();
+  NSFWDetection.stopMonitoring();
+  $('aiSafetyBadge').classList.add('hidden');
+
   $('callScreen').classList.remove('active');
   hideModal('incomingScreen');
   if (speechRecognition) { speechRecognition.stop(); }
@@ -582,18 +619,6 @@ function endCallCleanup() {
   checkAddContact(currentCalleeUid);
 }
 
-// ─── MeetlyFUN Integration (Strangers / Explore) ───────────
-let isStrangerCall = false;
-let currentStrangerId = null;
-let speechRecognition = null;
-let icebreakers = [
-  "What's your favorite movie?",
-  "If you could travel anywhere, where would you go?",
-  "What's your most controversial food opinion?",
-  "Do you have any hidden talents?",
-  "What's the best piece of advice you've received?"
-];
-
 function setupMeetlyFun() {
   if($('btnStrangerPrefsOpen')) {
     $('btnStrangerPrefsOpen').onclick = () => $('strangerPrefs').classList.remove('hidden');
@@ -620,6 +645,24 @@ function setupMeetlyFun() {
     $('btnStartStrangerMatch').onclick = startStrangerMatch;
     $('btnStrangerNext').onclick = startStrangerMatch;
 
+    // Report
+    $('btnStrangerReport').onclick = () => {
+      if (!currentStrangerId) return;
+      const reason = confirm('Are you sure you want to report this user for violating guidelines?');
+      if (reason) {
+        socket.emit('report-user', { targetUid: currentStrangerId });
+        showToast('User reported. Finding someone else...');
+        startStrangerMatch();
+      }
+    };
+
+    // Filters
+    $('btnStrangerFilters').onclick = () => {
+      renderFilterList();
+      $('filterPicker').classList.remove('hidden');
+    };
+    $('btnCloseFilters').onclick = () => $('filterPicker').classList.add('hidden');
+
     // Swiping logic
     let touchStartY = 0;
     $('swipeContainer').addEventListener('touchstart', e => { touchStartY = e.touches[0].clientY; });
@@ -632,6 +675,23 @@ function setupMeetlyFun() {
   }
 }
 
+function renderFilterList() {
+  const el = $('filterList');
+  const filters = FaceDetection.getFilters();
+  const current = FaceDetection.getCurrentFilter();
+  el.innerHTML = filters.map(f => `
+    <button class="filter-item ${f.key === current ? 'active' : ''}" onclick="applyFilter('${f.key}')" style="background:var(--surface); border:1px solid ${f.key === current ? 'var(--success)' : 'var(--border)'}; padding:16px; border-radius:12px; color:var(--tx); font-weight:600;">
+      ${f.label}
+    </button>
+  `).join('');
+}
+
+function applyFilter(key) {
+  FaceDetection.setFilter(key);
+  renderFilterList();
+  showToast(`Applied ${key} filter`);
+}
+
 async function startStrangerMatch() {
   if (peer) { endCallCleanup(); }
   $('swipeInstruction').classList.add('hidden');
@@ -640,18 +700,32 @@ async function startStrangerMatch() {
   $('strangerRemoteVideo').srcObject = null;
   $('icebreakerOverlay').classList.add('hidden');
   $('liveCaptions').textContent = '';
+  $('aiSafetyBadge').classList.remove('hidden');
 
   const prefs = JSON.parse(localStorage.getItem('mf_prefs') || '{}');
   
   try {
     localStream = await getMedia('video');
+    $('strangerLocalVideo').srcObject = localStream; 
+    $('localVideo').srcObject = localStream; // Also keep for general safety monitoring if needed
+    
+    // Start Safety AI
+    await FaceDetection.init($('strangerLocalVideo'));
+    FaceDetection.start();
+    
+    await NSFWDetection.init();
+    NSFWDetection.startMonitoring($('strangerLocalVideo'));
+
     if (prefs.anon) {
       $('localVideo').style.filter = 'blur(15px)';
-      // Voice filter can be simulated with BiquadFilter, but omitted for brevity
     } else {
-      $('localVideo').style.filter = 'none';
+      $('localVideo').style.filter = FaceDetection.getCurrentFilter() !== 'none' ? FaceDetection.getFilters().find(f=>f.key===FaceDetection.getCurrentFilter()).css : 'none';
     }
-  } catch(e) { showToast('Media access denied'); return; }
+  } catch(e) { 
+    console.error(e);
+    showToast('Media access denied'); 
+    return; 
+  }
   
   socket.emit('meetlyfun-match', { uid: currentUser.uid, prefs });
 }
@@ -660,7 +734,7 @@ async function startStrangerMatch() {
 socket.on('meetlyfun-matched', data => {
   isStrangerCall = true;
   currentCallId = data.callId;
-  currentCalleeUid = data.partnerUid;
+  currentStrangerId = data.partnerUid;
   $('strangerName').textContent = 'Stranger';
   $('strangerLangBadge').textContent = 'Matched';
   
@@ -675,9 +749,15 @@ socket.on('meetlyfun-matched', data => {
   }
 });
 
+socket.on('meetlyfun-status', data => {
+  $('strangerName').textContent = data.message;
+});
+
 // Live Captions via Web Speech API
 function startLiveCaptions() {
   if (!('webkitSpeechRecognition' in window)) return;
+  if (speechRecognition) speechRecognition.stop();
+  
   speechRecognition = new webkitSpeechRecognition();
   speechRecognition.continuous = true;
   speechRecognition.interimResults = true;
