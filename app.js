@@ -65,7 +65,11 @@ function setupAuthListeners() {
       currentUser = user;
       await ensureUserDoc(user);
       showApp();
-      connectSocket();
+      if (!socket) {
+        connectSocket();
+      } else if (socket.connected) {
+        sendUserOnline();
+      }
     } else {
       currentUser = null;
       if (socket) { socket.disconnect(); socket = null; }
@@ -77,18 +81,36 @@ function setupAuthListeners() {
 async function ensureUserDoc(user) {
   const ref = fbDB.collection('users').doc(user.uid);
   const snap = await ref.get();
+  
   if (!snap.exists) {
+    // Generate a short Call ID from name
+    let baseId = (user.displayName || 'user').toLowerCase().replace(/\s+/g, '').substring(0, 15);
+    let callId = baseId;
+    
+    // Check if taken (simple check for now, can be improved)
+    const exists = await fbDB.collection('users').where('callId', '==', callId).get();
+    if (!exists.empty) {
+      callId = baseId + Math.floor(Math.random() * 1000);
+    }
+
     await ref.set({
       uid:         user.uid,
+      callId:      callId,
       displayName: user.displayName || 'User',
       photoURL:    user.photoURL    || '',
       email:       user.email       || '',
       createdAt:   firebase.firestore.FieldValue.serverTimestamp()
     });
   } else {
+    const data = snap.data();
+    // If old user doesn't have a callId yet, generate one
+    if (!data.callId) {
+      let callId = (data.displayName || 'user').toLowerCase().replace(/\s+/g, '').substring(0, 15) + Math.floor(Math.random() * 100);
+      await ref.update({ callId: callId });
+    }
     await ref.update({
-      displayName: user.displayName || snap.data().displayName,
-      photoURL:    user.photoURL    || snap.data().photoURL,
+      displayName: user.displayName || data.displayName,
+      photoURL:    user.photoURL    || data.photoURL,
     });
   }
 }
@@ -106,29 +128,33 @@ function showApp() {
   loadCallLog();
 }
 
-function renderProfile() {
-  const u = currentUser;
-  $('profileAvatar').src = u.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.displayName || 'U') + '&background=6C63FF&color=fff';
-  $('profileName').textContent  = u.displayName || 'User';
-  $('profileEmail').textContent = u.email || '';
-  $('profileUID').textContent   = u.uid;
+async function renderProfile() {
+  const snap = await fbDB.collection('users').doc(currentUser.uid).get();
+  const userData = snap.data();
+  
+  $('profileAvatar').src = currentUser.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.displayName || 'U') + '&background=6C63FF&color=fff';
+  $('profileName').textContent  = currentUser.displayName || 'User';
+  $('profileEmail').textContent = currentUser.email || '';
+  $('profileUID').textContent   = userData.callId || userData.uid;
 
-  $('btnCopyUID').addEventListener('click', () => {
-    navigator.clipboard.writeText(u.uid).then(() => showToast('UID copied!'));
-  });
+  $('btnCopyUID').onclick = () => {
+    navigator.clipboard.writeText(userData.callId || userData.uid).then(() => showToast('ID copied!'));
+  };
 }
 
 // ─── Socket ────────────────────────────────────────────────
 function connectSocket() {
   const SERVER = 'https://callit-o-server.onrender.com';
-  socket = io(SERVER, { transports: ['websocket', 'polling'] });
+  socket = io(SERVER, { 
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: Infinity
+  });
 
   socket.on('connect', () => {
-    socket.emit('user-online', {
-      uid:         currentUser.uid,
-      displayName: currentUser.displayName,
-      photoURL:    currentUser.photoURL
-    });
+    console.log('[socket] connected');
+    sendUserOnline();
   });
 
   socket.on('incoming-call', handleIncomingCall);
@@ -138,7 +164,22 @@ function connectSocket() {
   socket.on('call-failed',   data => { showToast(data.reason || 'Call failed'); });
   socket.on('signal',        handleSignal);
 
-  socket.on('disconnect', () => console.log('[socket] disconnected'));
+  socket.on('disconnect', () => {
+    console.log('[socket] disconnected');
+    // Dot should go red if it's us or contacts
+    renderContacts(contacts); 
+  });
+}
+
+function sendUserOnline() {
+  if (socket && socket.connected && currentUser) {
+    socket.emit('user-online', {
+      uid:         currentUser.uid,
+      displayName: currentUser.displayName,
+      photoURL:    currentUser.photoURL
+    });
+    console.log('[socket] Emitted user-online for:', currentUser.displayName);
+  }
 }
 
 // ─── Contact Helpers ───────────────────────────────────────
@@ -226,9 +267,8 @@ function setupContactModal() {
   let foundUser = null;
 
   $('btnSearchUID').addEventListener('click', async () => {
-    const uid = $('addContactUID').value.trim();
-    if (!uid) { showToast('Enter a UID'); return; }
-    if (uid === currentUser.uid) { showToast("That's your own UID!"); return; }
+    const searchId = $('addContactUID').value.trim().toLowerCase();
+    if (!searchId) { showToast('Enter a Call ID'); return; }
 
     foundUser = null;
     $('addContactResult').classList.add('hidden');
@@ -236,15 +276,27 @@ function setupContactModal() {
     $('btnConfirmAdd').classList.add('hidden');
 
     try {
-      const snap = await fbDB.collection('users').doc(uid).get();
-      if (!snap.exists) throw new Error('Not found');
-      foundUser = snap.data();
+      // Search by callId OR uid
+      let snap = await fbDB.collection('users').where('callId', '==', searchId).get();
+      if (snap.empty) {
+        snap = await fbDB.collection('users').doc(searchId).get();
+        if (snap.exists) {
+          foundUser = snap.data();
+        }
+      } else {
+        foundUser = snap.docs[0].data();
+      }
+
+      if (!foundUser || foundUser.uid === currentUser.uid) {
+        throw new Error('Not found');
+      }
+
       $('addContactPhoto').src = getAvatarURL(foundUser.photoURL, foundUser.displayName);
       $('addContactName').textContent = foundUser.displayName;
-      $('addContactUID2').textContent = foundUser.uid;
+      $('addContactUID2').textContent = foundUser.callId || foundUser.uid;
       $('addContactResult').classList.remove('hidden');
       $('btnConfirmAdd').classList.remove('hidden');
-    } catch {
+    } catch (e) {
       $('addContactError').classList.remove('hidden');
     }
   });
